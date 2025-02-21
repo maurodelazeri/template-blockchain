@@ -60,6 +60,8 @@ contract DeployAndRunContract is Script {
     function run() external {
         address USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
         address USDC_WHALE = 0x7713974908Be4BEd47172370115e8b1219F4A5f0;
+
+        // In AAVE V3, the liquidity is actually held in the aToken contract
         address AUSDC_V3 = 0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c;  // aUSDC v3 token address
 
         console.log("----------------------------------------");
@@ -124,6 +126,7 @@ contract DeployAndRunContract is Script {
             address(0),
             ""
         );
+
         console.log("Flash Loan Operation Executed");
         console.log("Premium Paid:", premium / 1e6, "USDC");
         console.log("----------------------------------------");
