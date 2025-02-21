@@ -56,7 +56,7 @@ contract FlashLoanSimpleTest is Test {
 }
 
 
-contract DeployAndRunContract is Script {
+contract DeployAndFlashLoanAave is Script {
     function run() external {
         address USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
         address USDC_WHALE = 0x7713974908Be4BEd47172370115e8b1219F4A5f0;
