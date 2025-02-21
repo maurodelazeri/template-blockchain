@@ -60,15 +60,21 @@ contract DeployAndRunContract is Script {
     function run() external {
         address USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
         address USDC_WHALE = 0x7713974908Be4BEd47172370115e8b1219F4A5f0;
+        address AUSDC_V3 = 0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c;  // aUSDC v3 token address
 
         console.log("----------------------------------------");
         console.log("Starting Flash Loan Script");
         console.log("USDC Address:", USDC);
         console.log("USDC Whale Address:", USDC_WHALE);
+        console.log("aUSDC V3 Address:", AUSDC_V3);
 
         // Check initial balances
         uint256 whaleBalance = IERC20(USDC).balanceOf(USDC_WHALE);
         console.log("USDC Whale Initial Balance:", whaleBalance / 1e6, "USDC");
+
+        // Check aUSDC balance (this represents the actual pool liquidity)
+        uint256 aTokenBalance = IERC20(AUSDC_V3).totalSupply();
+        console.log("Aave V3 Pool Total Liquidity:", aTokenBalance / 1e6, "USDC");
         console.log("----------------------------------------");
 
         // Deploy FlashLoanSimple contract
@@ -79,10 +85,6 @@ contract DeployAndRunContract is Script {
         // Get pool information
         address poolAddress = address(flashLoanSimple.POOL());
         console.log("Aave Pool Address:", poolAddress);
-
-        // Check pool balance
-        uint256 poolBalance = IERC20(USDC).balanceOf(poolAddress);
-        console.log("Pool USDC Balance:", poolBalance / 1e6, "USDC");
         console.log("----------------------------------------");
 
         // Initial transfer to contract
