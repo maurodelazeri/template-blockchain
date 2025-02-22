@@ -6,7 +6,6 @@ import "../lib/forge-std/src/Script.sol";
 import "../lib/forge-std/src/console.sol";
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
-// Uniswap V2 Router Interface
 interface IUniswapV2Router {
     function swapExactTokensForTokens(
         uint amountIn,
@@ -17,7 +16,6 @@ interface IUniswapV2Router {
     ) external returns (uint[] memory amounts);
 }
 
-// Uniswap V3 Router Interface
 interface ISwapRouter {
     struct ExactInputSingleParams {
         address tokenIn;
@@ -36,7 +34,7 @@ contract CombinedSwap {
     address public owner;
     IUniswapV2Router public constant v2Router = IUniswapV2Router(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
     ISwapRouter public constant v3Router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
-    uint24 public constant poolFee = 3000; // 0.3% fee
+    uint24 public constant poolFee = 3000;
 
     event SwapExecuted(string protocol, uint256 amountIn, uint256 amountOut);
 
@@ -44,20 +42,27 @@ contract CombinedSwap {
         owner = msg.sender;
     }
 
-    // V2 Swap: DAI -> WETH
+    function formatAmount(uint256 amount) public pure returns (uint256 whole, uint256 decimal) {
+        whole = amount / 1e18;
+        decimal = (amount % 1e18) / 1e14; // Show 4 decimal places
+        return (whole, decimal);
+    }
+
     function swapV2_DAItoWETH(uint256 amountIn) external returns (uint256 amountOut) {
         require(msg.sender == owner, "Only owner");
 
         IERC20 dai = IERC20(0x6B175474E89094C44Da98b954EedeAC495271d0F);
         IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
-        // Log initial balances
         console.log("\n=== V2 Swap (DAI -> WETH) ===");
-        console.log("Initial DAI Balance: %s", dai.balanceOf(address(this)) / 1e18);
-        console.log("Initial WETH Balance: %s", weth.balanceOf(address(this)) / 1e18);
+        (uint256 daiWhole, uint256 daiDecimal) = formatAmount(dai.balanceOf(address(this)));
+        console.log("Initial DAI Balance: %s.%s", daiWhole, daiDecimal);
+        (uint256 wethWhole, uint256 wethDecimal) = formatAmount(weth.balanceOf(address(this)));
+        console.log("Initial WETH Balance: %s.%s", wethWhole, wethDecimal);
 
-        // Approve and swap
-        dai.approve(address(v2Router), amountIn);
+        require(dai.approve(address(v2Router), amountIn), "V2 approval failed");
+        console.log("V2 Router approved for %s DAI", amountIn / 1e18);
+
         address[] memory path = new address[](2);
         path[0] = address(dai);
         path[1] = address(weth);
@@ -71,27 +76,31 @@ contract CombinedSwap {
         );
         amountOut = amounts[1];
 
-        // Log results
-        console.log("DAI spent: %s", amountIn / 1e18);
-        console.log("WETH received: %s", amountOut / 1e18);
+        (daiWhole, daiDecimal) = formatAmount(amountIn);
+        console.log("DAI spent: %s.%s", daiWhole, daiDecimal);
+        (wethWhole, wethDecimal) = formatAmount(amountOut);
+        console.log("WETH received: %s.%s", wethWhole, wethDecimal);
+
         emit SwapExecuted("Uniswap V2", amountIn, amountOut);
         return amountOut;
     }
 
-    // V3 Swap: WETH -> DAI
     function swapV3_WETHtoDAI(uint256 amountIn) external returns (uint256 amountOut) {
         require(msg.sender == owner, "Only owner");
+        require(amountIn > 0, "No WETH to swap");
 
         IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
         IERC20 dai = IERC20(0x6B175474E89094C44Da98b954EedeAC495271d0F);
 
-        // Log initial balances
         console.log("\n=== V3 Swap (WETH -> DAI) ===");
-        console.log("Initial WETH Balance: %s", weth.balanceOf(address(this)) / 1e18);
-        console.log("Initial DAI Balance: %s", dai.balanceOf(address(this)) / 1e18);
+        (uint256 wethWhole, uint256 wethDecimal) = formatAmount(weth.balanceOf(address(this)));
+        console.log("Initial WETH Balance: %s.%s", wethWhole, wethDecimal);
+        (uint256 daiWhole, uint256 daiDecimal) = formatAmount(dai.balanceOf(address(this)));
+        console.log("Initial DAI Balance: %s.%s", daiWhole, daiDecimal);
 
-        // Approve and swap
-        weth.approve(address(v3Router), amountIn);
+        require(weth.approve(address(v3Router), amountIn), "V3 approval failed");
+        (wethWhole, wethDecimal) = formatAmount(amountIn);
+        console.log("V3 Router approved for %s.%s WETH", wethWhole, wethDecimal);
 
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(weth),
@@ -106,9 +115,11 @@ contract CombinedSwap {
 
         amountOut = v3Router.exactInputSingle(params);
 
-        // Log results
-        console.log("WETH spent: %s", amountIn / 1e18);
-        console.log("DAI received: %s", amountOut / 1e18);
+        (wethWhole, wethDecimal) = formatAmount(amountIn);
+        console.log("WETH spent: %s.%s", wethWhole, wethDecimal);
+        (daiWhole, daiDecimal) = formatAmount(amountOut);
+        console.log("DAI received: %s.%s", daiWhole, daiDecimal);
+
         emit SwapExecuted("Uniswap V3", amountIn, amountOut);
         return amountOut;
     }
@@ -120,8 +131,10 @@ contract DeployAndExecuteSwaps is Script {
         IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
         console.log("\n%s", stage);
-        console.log("Contract DAI Balance: %s", dai.balanceOf(contractAddr) / 1e18);
-        console.log("Contract WETH Balance: %s", weth.balanceOf(contractAddr) / 1e18);
+        (uint256 daiWhole, uint256 daiDecimal) = CombinedSwap(payable(contractAddr)).formatAmount(dai.balanceOf(contractAddr));
+        console.log("Contract DAI Balance: %s.%s", daiWhole, daiDecimal);
+        (uint256 wethWhole, uint256 wethDecimal) = CombinedSwap(payable(contractAddr)).formatAmount(weth.balanceOf(contractAddr));
+        console.log("Contract WETH Balance: %s.%s", wethWhole, wethDecimal);
         console.log("----------------------------------------");
     }
 
@@ -133,24 +146,23 @@ contract DeployAndExecuteSwaps is Script {
 
         vm.startBroadcast(DAI_WHALE);
 
-        // Deploy contract
         CombinedSwap swapContract = new CombinedSwap();
         console.log("Swap contract deployed at:", address(swapContract));
 
-        // Transfer 1000 DAI to contract
-        uint256 initialAmount = 1000 * 10**18; // 1000 DAI
-        IERC20(DAI).transfer(address(swapContract), initialAmount);
+        uint256 initialAmount = 1000 * 10**18;
+        require(IERC20(DAI).transfer(address(swapContract), initialAmount), "Transfer failed");
 
-        // Log initial balances
         logBalances(address(swapContract), "Initial Balances:");
 
-        // Execute V2 swap (DAI -> WETH)
         uint256 wethAmount = swapContract.swapV2_DAItoWETH(initialAmount);
         logBalances(address(swapContract), "After V2 Swap (DAI -> WETH):");
 
-        // Execute V3 swap (WETH -> DAI)
-        swapContract.swapV3_WETHtoDAI(wethAmount);
-        logBalances(address(swapContract), "After V3 Swap (WETH -> DAI):");
+        if (wethAmount > 0) {
+            swapContract.swapV3_WETHtoDAI(wethAmount);
+            logBalances(address(swapContract), "After V3 Swap (WETH -> DAI):");
+        } else {
+            console.log("Skipping V3 swap due to zero WETH received from V2 swap");
+        }
 
         vm.stopBroadcast();
     }
