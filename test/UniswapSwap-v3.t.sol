@@ -83,7 +83,7 @@ contract UniswapSwap {
     }
 }
 
-contract DeployAndSwapUniswap is Script {
+contract DeployAndSwapUniswapV3 is Script {
     function logBalances(
         address usdc,
         address weth,
