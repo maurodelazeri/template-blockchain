@@ -56,12 +56,11 @@ contract UniswapV2Swap {
         );
         amountOut = amounts[1];
 
-        // Updated logging with decimal precision
         console.log("\n----------------------------------------");
         console.log("Swap Complete!");
         console.log("DAI spent: %s (%s DAI)", amountIn, amountIn / 1e18);
         uint256 wethInteger = amountOut / 1e18;
-        uint256 wethFraction = amountOut % 1e18; // Full precision
+        uint256 wethFraction = (amountOut % 1e18) / 1e12; // 6 decimals
         console.log("WETH received: %s (%s.%s WETH)", amountOut, wethInteger, wethFraction);
         console.log("----------------------------------------\n");
 
@@ -81,6 +80,7 @@ contract UniswapV2Swap {
 }
 
 contract DeployAndSwapUniswapV2 is Script {
+
     function logBalances(
         address dai,
         address weth,
@@ -92,9 +92,8 @@ contract DeployAndSwapUniswapV2 is Script {
 
         console.log("\n%s", label);
         console.log("DAI Balance: %s (%s DAI)", daiBalance, daiBalance / 1e18);
-        // For WETH, split into integer and fractional parts
         uint256 wethInteger = wethBalance / 1e18;
-        uint256 wethFraction = wethBalance % 1e18; // Remainder for decimals
+        uint256 wethFraction = (wethBalance % 1e18) / 1e12; // 6 decimals
         console.log("WETH Balance: %s (%s.%s WETH)", wethBalance, wethInteger, wethFraction);
         console.log("----------------------------------------\n");
     }
