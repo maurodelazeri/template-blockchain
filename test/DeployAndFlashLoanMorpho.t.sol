@@ -50,7 +50,7 @@ contract DeployAndFlashLoanMorpho is Script {
         );
 
         // Initiate a flash loan of 1000 DAI (1000e18 due to 18 decimals)
-        fl.initiateFlashLoan(1000e18);
+        fl.initiateFlashLoan(100_000_000 * 10**18);
 
         // Stop broadcasting
         vm.stopBroadcast();
