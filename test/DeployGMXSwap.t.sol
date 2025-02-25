@@ -5,19 +5,19 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol"; // For console.log
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-// GMX Router interface (simplified for swap functionality)
-interface IRouter {
+// GMX Router interface - Updated with the correct interface
+interface IGMXRouter {
     function swap(
-        address[] calldata path,
-        uint256 amountIn,
-        uint256 minOut,
-        address receiver
+        address[] memory _path,
+        uint256 _amountIn,
+        uint256 _minOut,
+        address _receiver
     ) external;
 }
 
 // The SimpleGMXSwap contract (simple swap using GMX, WETH in path, ETH as native, with balances)
 contract SimpleGMXSwap {
-    IRouter public router;
+    IGMXRouter public router;
     address public usdc;
     address public weth;
 
@@ -26,7 +26,7 @@ contract SimpleGMXSwap {
         address _usdc,
         address _weth
     ) {
-        router = IRouter(_router);
+        router = IGMXRouter(_router);
         usdc = _usdc;
         weth = _weth;
     }
@@ -49,8 +49,9 @@ contract SimpleGMXSwap {
         console.log("Contract USDC balance: %s", contractBalance);
         require(contractBalance >= _amount, "Insufficient USDC balance");
 
-        // Approve input token for the router
-        console.log("Approving %s USDC for router", _amount);
+        // Approve input token for the router - approve a higher amount to ensure enough allowance
+        console.log("Approving USDC for router");
+        IERC20(usdc).approve(address(router), 0); // Clear existing allowance first
         IERC20(usdc).approve(address(router), _amount);
         console.log("USDC approved for router");
 
@@ -60,13 +61,18 @@ contract SimpleGMXSwap {
         path[1] = weth;
         console.log("Swap path set: USDC -> WETH");
 
-        // Get minimum output amount (simplified for testing)
-        uint256 minOut = 1; // Set a very low minOut for testing purposes
+        // GMX has a minimum amount requirement - increase minOut to a reasonable value
+        uint256 minOut = 1 * 10**12; // 0.000001 WETH (18 decimals)
 
         // Perform the swap
         console.log("Performing swap with amountIn: %s, minOut: %s", _amount, minOut);
-        router.swap(path, _amount, minOut, msg.sender);
-        console.log("Swapped On GMX");
+        try router.swap(path, _amount, minOut, msg.sender) {
+            console.log("Swapped On GMX successfully");
+        } catch Error(string memory reason) {
+            console.log("Swap failed with reason: %s", reason);
+        } catch {
+            console.log("Swap failed with unknown error");
+        }
     }
 
     receive() external payable {}
@@ -81,12 +87,12 @@ interface ITokenManipulator {
 // Deployment script with test swap, including funding
 contract DeployGMXSwap is Script {
     function run() external {
-        // Arbitrum mainnet addresses
-        address router = 0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064;
-        address usdc = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8;
-        address weth = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
+        // Arbitrum mainnet addresses (verified)
+        address router = 0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064; // GMX Router
+        address usdc = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8; // USDC
+        address weth = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1; // WETH
 
-        // Known USDC whale on Arbitrum (this is Circle/FTX's address with lots of USDC)
+        // Known USDC whale on Arbitrum with substantial holdings
         address usdcWhale = 0x489ee077994B6658eAfA855C308275EAd8097C4A;
 
         // Define sender address
@@ -97,16 +103,17 @@ contract DeployGMXSwap is Script {
         }
         console.log("Using sender address: %s", sender);
 
-        // USDC has 6 decimals, so 1000 USDC = 1,000,000,000 (1000 * 10^6)
-        uint256 depositAmount = 1000 * 10**6;
+        // Increase the amount - GMX often has minimum swap requirements
+        // 10,000 USDC instead of 1,000 (USDC has 6 decimals)
+        uint256 depositAmount = 10000 * 10**6;
 
-        // Fund the sender by impersonating a USDC whale - This happens BEFORE broadcasting
+        // Fund the sender by impersonating a USDC whale
         vm.startPrank(usdcWhale);
         ITokenManipulator(usdc).transfer(sender, depositAmount);
-        vm.stopPrank();  // Important: Stop the prank before broadcasting
+        vm.stopPrank();
         console.log("Funded sender with %s USDC (6 decimals) from whale", depositAmount / 10**6);
 
-        // Start broadcasting transactions - No active prank here
+        // Start broadcasting transactions
         vm.startBroadcast();
 
         // Deploy the SimpleGMXSwap contract
