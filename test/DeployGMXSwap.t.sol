@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol"; // For console.log
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-// GMX Router interface - Updated with the correct interface
+// GMX Router interface
 interface IGMXRouter {
     function swap(
         address[] memory _path,
@@ -34,7 +34,8 @@ contract SimpleGMXSwap {
     // Function to deposit USDC into the contract
     function depositUSDC(uint256 _amount) external {
         console.log("Depositing %s USDC into contract", _amount);
-        IERC20(usdc).transferFrom(msg.sender, address(this), _amount);
+        bool success = IERC20(usdc).transferFrom(msg.sender, address(this), _amount);
+        require(success, "USDC transfer failed");
         console.log("USDC deposited, contract balance: %s", IERC20(usdc).balanceOf(address(this)));
     }
 
@@ -52,7 +53,8 @@ contract SimpleGMXSwap {
         // Approve input token for the router - approve a higher amount to ensure enough allowance
         console.log("Approving USDC for router");
         IERC20(usdc).approve(address(router), 0); // Clear existing allowance first
-        IERC20(usdc).approve(address(router), _amount);
+        bool success = IERC20(usdc).approve(address(router), _amount);
+        require(success, "USDC approval failed");
         console.log("USDC approved for router");
 
         // Set up swap path (USDC -> WETH)
@@ -70,30 +72,23 @@ contract SimpleGMXSwap {
             console.log("Swapped On GMX successfully");
         } catch Error(string memory reason) {
             console.log("Swap failed with reason: %s", reason);
+            revert(reason);
         } catch {
             console.log("Swap failed with unknown error");
+            revert("Unknown swap error");
         }
     }
 
     receive() external payable {}
 }
 
-// Helper interface for manipulating tokens in a forge script
-interface ITokenManipulator {
-    function balanceOf(address account) external view returns (uint256);
-    function transfer(address to, uint256 amount) external returns (bool);
-}
-
-// Deployment script with test swap, including funding
+// Deployment script with test swap, using impersonation on a forked network
 contract DeployGMXSwap is Script {
     function run() external {
         // Arbitrum mainnet addresses (verified)
         address router = 0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064; // GMX Router
         address usdc = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8; // USDC
         address weth = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1; // WETH
-
-        // Known USDC whale on Arbitrum with substantial holdings
-        address usdcWhale = 0x489ee077994B6658eAfA855C308275EAd8097C4A;
 
         // Define sender address
         address sender = vm.addr(vm.envUint("PRIVATE_KEY"));
@@ -103,18 +98,41 @@ contract DeployGMXSwap is Script {
         }
         console.log("Using sender address: %s", sender);
 
-        // Increase the amount - GMX often has minimum swap requirements
-        // 10,000 USDC instead of 1,000 (USDC has 6 decimals)
-        uint256 depositAmount = 10000 * 10**6;
+        // Use a reasonable amount for testing
+        uint256 depositAmount = 5000 * 10**6; // 5,000 USDC (6 decimals)
 
-        // Fund the sender by impersonating a USDC whale
+        // STEP 1: Fund the sender with USDC by impersonating a whale
+        // This is Binance's hot wallet which has USDC on Arbitrum
+        address usdcWhale = 0x7B7B957c284C2C227C980d6E2F804311947b84d0;
+
+        // Check whale's balance before proceeding
+        uint256 whaleBalance = IERC20(usdc).balanceOf(usdcWhale);
+        console.log("Whale USDC balance: %s", whaleBalance / 10**6);
+
+        if (whaleBalance < depositAmount) {
+            console.log("Not enough USDC in whale account. Trying another whale...");
+            // Try another whale
+            usdcWhale = 0x489ee077994B6658eAfA855C308275EAd8097C4A;
+            whaleBalance = IERC20(usdc).balanceOf(usdcWhale);
+            console.log("Alternative whale USDC balance: %s", whaleBalance / 10**6);
+        }
+
+        require(whaleBalance >= depositAmount, "No whale with enough USDC found");
+
+        // Impersonate the whale to transfer USDC to our sender
         vm.startPrank(usdcWhale);
-        ITokenManipulator(usdc).transfer(sender, depositAmount);
+        IERC20(usdc).transfer(sender, depositAmount);
         vm.stopPrank();
-        console.log("Funded sender with %s USDC (6 decimals) from whale", depositAmount / 10**6);
 
-        // Start broadcasting transactions
+        console.log("Transferred %s USDC from whale to sender", depositAmount / 10**6);
+
+        // STEP 2: Deploy and test the contract
         vm.startBroadcast();
+
+        // Verify we have the USDC
+        uint256 senderBalance = IERC20(usdc).balanceOf(sender);
+        console.log("Sender USDC balance: %s", senderBalance / 10**6);
+        require(senderBalance >= depositAmount, "Sender does not have enough USDC");
 
         // Deploy the SimpleGMXSwap contract
         SimpleGMXSwap swapContract = new SimpleGMXSwap(
@@ -130,14 +148,20 @@ contract DeployGMXSwap is Script {
 
         // Call depositUSDC to transfer USDC to the contract
         swapContract.depositUSDC(depositAmount);
+        console.log("USDC deposited to contract");
+
+        // Check contract balance
+        uint256 contractBalance = IERC20(usdc).balanceOf(address(swapContract));
+        console.log("Contract USDC balance: %s", contractBalance / 10**6);
 
         // Test swapOnGMX (using the deposited USDC)
         console.log("Testing swapOnGMX with %s USDC to WETH", depositAmount / 10**6);
-
-        // Call swapOnGMX
         swapContract.swapOnGMX(depositAmount);
 
-        // Stop broadcasting
+        // Check WETH balance after swap
+        uint256 wethBalance = IERC20(weth).balanceOf(sender);
+        console.log("Sender WETH balance after swap: %s", wethBalance / 10**18);
+
         vm.stopBroadcast();
     }
 }
